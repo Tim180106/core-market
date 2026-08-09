@@ -1,6 +1,6 @@
 # C.O.R.E — central config
-# Version: v0.2 (Section 2 — populated data universe; Section 1 had placeholders only)
-# Every pipeline script should read from this file rather than hardcoding tickers/paths.
+# Version: v0.3 (Section 2 AMENDMENT — source strategy revised after live Colab test showed
+# yfinance fully blocked, 0/14. See docs/data_sources.md Section 2 Amendment for full rationale.)
 
 project:
   name: "core-market"
@@ -17,54 +17,54 @@ paths:
   handoffs: "docs/handoffs"
 
 date_range:
-  start: "2015-01-01"   # backtest history window; revisit once we know Colab RAM limits in Section 3
-  end: null              # null = pull up to latest available
+  start: "2015-01-01"
+  end: null
 
 # ---------------------------------------------------------------------------
-# UNIVERSE — what we actually pull. See docs/data_sources.md for full rationale.
+# UNIVERSE — source field per instrument now reflects the amended strategy.
+# See docs/data_sources.md for full rationale on the NSE Bhavcopy pivot.
 # ---------------------------------------------------------------------------
 universe:
 
   indices:
-    nifty50:    { symbol: "^NSEI",     source: "yfinance" }
-    sensex:     { symbol: "^BSESN",    source: "yfinance" }
-    nifty_bank: { symbol: "^NSEBANK",  source: "yfinance" }
-    # nifty_next50 symbol has been historically unreliable on yfinance — verify before trusting
-    nifty_next50: { symbol: "^NSEMDCP50", source: "yfinance", status: "unverified" }
+    nifty50:      { symbol: "^NSEI",    primary_source: "nse_index_report", secondary_source: "yfinance", status: "endpoint_tbd_section3" }
+    sensex:       { symbol: "^BSESN",   primary_source: "nse_index_report", secondary_source: "yfinance", status: "endpoint_tbd_section3" }
+    nifty_bank:   { symbol: "^NSEBANK", primary_source: "nse_index_report", secondary_source: "yfinance", status: "endpoint_tbd_section3" }
+    nifty_next50: { symbol: "^NSEMDCP50", primary_source: "nse_index_report", secondary_source: "yfinance", status: "unverified" }
 
   stocks:
-    # Initial universe: liquid Nifty 50 large-caps, .NS (NSE) as primary listing.
-    # Expand/trim this list freely — everything downstream reads from here.
-    - { ticker: "RELIANCE.NS",   sector: "energy" }
-    - { ticker: "TCS.NS",        sector: "it" }
-    - { ticker: "HDFCBANK.NS",   sector: "financials" }
-    - { ticker: "ICICIBANK.NS",  sector: "financials" }
-    - { ticker: "INFY.NS",       sector: "it" }
-    - { ticker: "HINDUNILVR.NS", sector: "fmcg" }
-    - { ticker: "ITC.NS",        sector: "fmcg" }
-    - { ticker: "SBIN.NS",       sector: "financials" }
-    - { ticker: "BHARTIARTL.NS", sector: "telecom" }
-    - { ticker: "KOTAKBANK.NS",  sector: "financials" }
-    - { ticker: "LT.NS",         sector: "industrials" }
-    - { ticker: "AXISBANK.NS",   sector: "financials" }
-    - { ticker: "BAJFINANCE.NS", sector: "financials" }
-    - { ticker: "MARUTI.NS",     sector: "auto" }
-    - { ticker: "SUNPHARMA.NS",  sector: "pharma" }
+    # Source: NSE Bhavcopy (UDiFF format), one file per trading day covers the whole list.
+    # https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{YYYYMMDD}_F_0000.csv.zip
+    - { ticker: "RELIANCE",   yf_ticker: "RELIANCE.NS",   sector: "energy" }
+    - { ticker: "TCS",        yf_ticker: "TCS.NS",        sector: "it" }
+    - { ticker: "HDFCBANK",   yf_ticker: "HDFCBANK.NS",   sector: "financials" }
+    - { ticker: "ICICIBANK",  yf_ticker: "ICICIBANK.NS",  sector: "financials" }
+    - { ticker: "INFY",       yf_ticker: "INFY.NS",       sector: "it" }
+    - { ticker: "HINDUNILVR", yf_ticker: "HINDUNILVR.NS", sector: "fmcg" }
+    - { ticker: "ITC",        yf_ticker: "ITC.NS",        sector: "fmcg" }
+    - { ticker: "SBIN",       yf_ticker: "SBIN.NS",       sector: "financials" }
+    - { ticker: "BHARTIARTL", yf_ticker: "BHARTIARTL.NS", sector: "telecom" }
+    - { ticker: "KOTAKBANK",  yf_ticker: "KOTAKBANK.NS",  sector: "financials" }
+    - { ticker: "LT",         yf_ticker: "LT.NS",         sector: "industrials" }
+    - { ticker: "AXISBANK",   yf_ticker: "AXISBANK.NS",   sector: "financials" }
+    - { ticker: "BAJFINANCE", yf_ticker: "BAJFINANCE.NS", sector: "financials" }
+    - { ticker: "MARUTI",     yf_ticker: "MARUTI.NS",     sector: "auto" }
+    - { ticker: "SUNPHARMA",  yf_ticker: "SUNPHARMA.NS",  sector: "pharma" }
+    # `ticker` = NSE symbol as it appears in Bhavcopy (primary key going forward).
+    # `yf_ticker` kept only for the yfinance secondary-path fallback.
 
   commodities:
-    gold:        { symbol: "GC=F", source: "yfinance" }
-    silver:      { symbol: "SI=F", source: "yfinance" }
-    crude_wti:   { symbol: "CL=F", source: "yfinance" }
-    crude_brent: { symbol: "BZ=F", source: "yfinance", note: "preferred over WTI — India's imports are Brent-priced" }
-    copper:      { symbol: "HG=F", source: "yfinance" }
-    nat_gas:     { symbol: "NG=F", source: "yfinance" }
+    gold:        { symbol: "GC=F", stooq_symbol: "xauusd", primary_source: "yfinance", fallback_source: "stooq_csv" }
+    silver:      { symbol: "SI=F", stooq_symbol: null,      primary_source: "yfinance", fallback_source: "stooq_csv", note: "stooq symbol tbd Section 3" }
+    crude_wti:   { symbol: "CL=F", stooq_symbol: "cl.f",    primary_source: "yfinance", fallback_source: "stooq_csv" }
+    crude_brent: { symbol: "BZ=F", stooq_symbol: null,      primary_source: "yfinance", fallback_source: "stooq_csv", note: "preferred over WTI for India — Brent-priced imports; stooq symbol tbd" }
+    copper:      { symbol: "HG=F", stooq_symbol: null,      primary_source: "yfinance", fallback_source: "stooq_csv", note: "stooq symbol tbd Section 3" }
+    nat_gas:     { symbol: "NG=F", stooq_symbol: null,      primary_source: "yfinance", fallback_source: "stooq_csv", note: "stooq symbol tbd Section 3" }
 
   currency:
-    usd_inr: { symbol: "USDINR=X", source: "yfinance" }
+    usd_inr: { symbol: "USDINR=X", stooq_symbol: "usdinr", primary_source: "yfinance", fallback_source: "stooq_csv" }
 
   macro:
-    # No clean free API — manual periodic CSV snapshots from RBI DBIE (dbie.rbihub.in).
-    # Files land in data/macro/ named like repo_rate_2026-08.csv; pipeline reads latest.
     source: "RBI DBIE (manual export)"
     secondary_source: "data.gov.in (per-series check)"
     series:
@@ -78,18 +78,26 @@ universe:
   calendar_effects:
     source: "computed"
     fno_expiry_rule: "last Thursday of month (NSE convention) — must reconcile against NSE holiday calendar"
-    festival_table_path: "config/festival_dates.yaml"   # to be created in Section 5 or 6
+    festival_table_path: "config/festival_dates.yaml"
 
   lunar_phase:
     source: "computed"
     method: "pure astronomical formula, no API/library dependency"
 
 # ---------------------------------------------------------------------------
-# Fetch behavior — enforced starting Section 3, declared here so it's config-driven
+# Fetch behavior
 # ---------------------------------------------------------------------------
 fetch:
   batch_size: 5
   delay_between_batches_sec: 2
   max_retries: 4
   backoff_base_sec: 5
-  fallback_source_for_indices: "stooq"
+  fallback_source_for_indices: "nse_index_report"   # was "stooq" in v0.2 — revised, see amendment
+  nse_bhavcopy:
+    url_template: "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{yyyymmdd}_F_0000.csv.zip"
+    requires_browser_user_agent: true
+    requires_cookie_warmup: true
+    warmup_url: "https://www.nseindia.com"
+  stooq_csv:
+    url_template: "https://stooq.com/q/d/l/?s={symbol}&d1={start}&d2={end}&i=d"
+    note: "low daily request quota — use for a handful of fallback series, not bulk pulls"
