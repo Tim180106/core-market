@@ -1,0 +1,18 @@
+# Data
+yfinance==0.2.54
+pandas==2.2.2
+numpy==1.26.4
+
+# Stats / ML
+scikit-learn==1.5.1
+statsmodels==0.14.2
+torch==2.4.0
+
+# Viz
+matplotlib==3.9.1
+seaborn==0.13.2
+
+# Utils
+pyyaml==6.0.2
+tqdm==4.66.5
+python-dateutil==2.9.0
