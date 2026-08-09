@@ -1,0 +1,21 @@
+project:
+  name: "C.O.R.E"
+  version: "0.1.0"
+
+data:
+  start_date: "2015-01-01"
+  end_date: null          # null = today, computed at runtime
+  universe:
+    indices: ["^NSEI", "^BSESN"]        # Nifty 50, Sensex
+    stocks_placeholder: []              # populated in Section 2 (Data Source Mapping)
+  timezone: "Asia/Kolkata"
+
+paths:
+  raw: "data/raw"
+  processed: "data/processed"
+  cache: "data/cache"
+  models: "models_saved"
+
+colab:
+  drive_mount_path: "/content/drive"
+  drive_project_folder: "MyDrive/core-market"
