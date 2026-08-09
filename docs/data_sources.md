@@ -1,152 +1,125 @@
 # Data Source Map — C.O.R.E
-Version: v0.1
+Version: v0.2 (AMENDED after live Colab test — see Section 2 Amendment below)
 Section: 2 — Data Source Mapping
-Last verified: 2026-08-10 (web-verified where noted; re-check before long-running use, these things drift)
-
-This file is the single reference for **every external data source** C.O.R.E pulls from.
-Every future section that fetches data must point back here instead of re-deciding sources ad hoc.
+Last verified: 2026-08-10
 
 ---
 
-## 1. Guiding rule for this section
+## SECTION 2 AMENDMENT (read this first)
 
-Nothing here costs money and nothing needs an API key. Where a "clean API" doesn't exist for free,
-we use a documented workaround (scraping a public page, downloading a public CSV, or a manual
-periodic snapshot) and we say so explicitly, so nobody mistakes it for a guaranteed live feed later.
+v0.1 of this doc treated `yfinance` as the primary source for everything: indices, stocks,
+commodities, and currency. A live connectivity test run in Colab returned **0/14 sources reachable**
+— every single yfinance call failed with `YFRateLimitError`, including global futures tickers that
+have nothing to do with India. That rules out "our specific tickers are the problem" — this is Yahoo
+blocking the request pattern/IP wholesale, which is a widely-documented, current issue with
+`yfinance` on shared-IP environments like Colab (Yahoo tightened anti-scraping defenses through
+2025–2026; the underlying `yfinance` GitHub repo has dozens of open reports of exactly this).
 
----
+**Decision:** Split the sourcing strategy by asset class instead of leaning on one library for
+everything:
 
-## 2. Equity & Index data — `yfinance`
-
-**Library:** `yfinance` (unofficial, scrapes Yahoo Finance's public endpoints — no key).
-
-**Known limitation we must design around (verified via current reporting, not just assumption):**
-Yahoo has tightened anti-scraping defenses. `yfinance` users are commonly hitting `YFRateLimitError`
-(HTTP 429) with bursty or frequent requests, and Yahoo occasionally reshapes its endpoints, which can
-break the library without warning. This is a real, current risk for this project, not a hypothetical.
-
-**Design decisions this forces (build into Section 3, flagging now):**
-- Always download in small batches with delays between calls, never one call per ticker in a tight loop.
-- Cache every raw pull to disk (`data/raw/`) so re-runs don't re-hit the network.
-- Wrap every call in retry-with-backoff.
-- Keep a fallback path to **Stooq** (`pandas_datareader` or direct CSV, also free/no-key) for core
-  indices/large-caps if `yfinance` is rate-limited mid-session. Stooq's Indian single-stock coverage is
-  thinner than Yahoo's, so it's a fallback for indices/majors, not a full replacement.
-
-### Indices (confirmed symbols)
-| Name | yfinance symbol | Notes |
+| Asset class | Old plan (v0.1) | New plan (v0.2) |
 |---|---|---|
-| Nifty 50 | `^NSEI` | NSE broad benchmark |
-| Sensex 30 | `^BSESN` | BSE benchmark |
-| Nifty Bank | `^NSEBANK` | Banking sector index |
-| Nifty Next 50 | `^NSEMDCP50` | Verify on pull — this symbol has been unreliable historically |
+| NSE indices & stocks | yfinance | **NSE Bhavcopy (official, direct)** — primary. yfinance kept as opportunistic secondary only. |
+| Commodities & USD/INR | yfinance | yfinance retry-first, **Stooq direct CSV** fallback (not `pandas_datareader.stooq`, which is broken for commodities — see below) |
+| Macro (repo rate, CPI, etc.) | Manual RBI DBIE CSV | Unchanged |
+| Calendar / lunar | Computed | Unchanged |
 
-### Individual stocks
-- **NSE-listed stocks:** ticker + `.NS` suffix, e.g. `RELIANCE.NS`, `TCS.NS`, `HDFCBANK.NS`.
-- **BSE-listed stocks:** ticker + `.BO` suffix, e.g. `500325.BO`.
-- We standardize on **`.NS` (NSE) as primary** for the stock universe since NSE has deeper liquidity;
-  `.BO` is kept only as a cross-check / fallback per symbol.
-
-### Initial stock universe (Nifty 50 large-caps — liquid, low missing-data risk)
-Placeholder set for Section 3 to actually pull; final list goes in `settings.yaml`:
-`RELIANCE.NS, TCS.NS, HDFCBANK.NS, ICICIBANK.NS, INFY.NS, HINDUNILVR.NS, ITC.NS, SBIN.NS,
-BHARTIARTL.NS, KOTAKBANK.NS, LT.NS, AXISBANK.NS, BAJFINANCE.NS, MARUTI.NS, SUNPHARMA.NS`
+This is a better design anyway, not just a workaround: NSE publishing its own data directly is more
+authoritative than an unofficial scrape of a third party's unofficial scrape of NSE's data.
 
 ---
 
-## 3. Commodity data — `yfinance` (futures proxies)
+## 1. Equity & Index data — NSE Bhavcopy (NEW primary source)
 
-No free clean commodity-spot API exists without a key, so we use CME/COMEX futures continuous
-contracts as liquid, free proxies — standard practice for retail-grade correlation work.
+**What it is:** NSE publishes an official end-of-day "Bhavcopy" file every trading day, directly from
+their own servers. Since July 2024 this is in the new **UDiFF (Unified Distilled File Format)** —
+the old `archives.nseindia.com/.../cmDDMMMYYYYbhav.csv.zip` links are discontinued; anything built
+before mid-2024 (including many tutorials still floating around) is using a dead URL pattern.
 
-| Commodity | yfinance symbol | Notes |
-|---|---|---|
-| Gold | `GC=F` | COMEX gold futures |
-| Silver | `SI=F` | COMEX silver futures |
-| Crude oil (WTI) | `CL=F` | NYMEX |
-| Crude oil (Brent) | `BZ=F` | ICE — India's imports are Brent-priced, so prefer this over WTI |
-| Copper | `HG=F` | COMEX — industrial demand proxy |
-| Natural gas | `NG=F` | NYMEX |
+**Confirmed current URL pattern (equities, Capital Market segment):**
+```
+https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{YYYYMMDD}_F_0000.csv.zip
+```
+e.g. for 10 Aug 2026: `.../BhavCopy_NSE_CM_0_0_0_20260810_F_0000.csv.zip`
 
-Caveat: these are USD-denominated global futures, not INR spot prices. Any correlation feature built
-on them should also account for USD-INR movement (Section 5), or the "commodity effect" and "currency
-effect" will get tangled together.
+**Known gotcha (build this into Section 3, flagging now):** NSE's servers commonly reject requests
+that look like bare scripts — a plain `requests.get()` with no browser-like `User-Agent` header often
+gets a 403, and some setups need a "warm-up" GET to `https://www.nseindia.com` first to pick up
+session cookies before the archive URL will respond. This is a known quirk of the NSE site, not
+something specific to our code.
+
+**What it covers:** Every NSE-listed equity's OHLCV for that day, in one file — covers our whole
+stock universe in a single daily download instead of one call per ticker. This is also inherently
+more Colab-friendly: one file per day instead of 15+ separate rate-limitable calls.
+
+**What it does NOT cover:** Index-level closing values (Nifty 50, Sensex, Nifty Bank) come from a
+separate NSE report, not the equity Bhavcopy. The exact current endpoint for this needs to be
+pinned down and live-tested in Section 3 rather than guessed here — NSE has changed this a few times
+too, and shipping an unverified URL would just move the problem instead of fixing it.
+
+**Historical depth:** Bhavcopy archives go back to the 1990s, so backtesting depth is not a concern.
 
 ---
 
-## 4. Currency — `yfinance`
+## 2. Commodity & currency data — yfinance (retry) → Stooq CSV (fallback)
 
-| Pair | yfinance symbol |
+Gold/silver/crude/copper/USD-INR aren't NSE instruments, so Bhavcopy doesn't help here. Plan:
+
+1. **Try yfinance first**, since the block may be temporary/session-specific — worth a low-cost retry
+   at ingestion time in Section 3, not worth relying on.
+2. **Fallback: Stooq's direct CSV download endpoint**, not the `pandas_datareader.stooq` wrapper —
+   that wrapper has been broken for commodity symbols specifically since late 2021 (confirmed via
+   current bug reports), even though it still works for equities/indices. The raw endpoint
+   (`https://stooq.com/q/d/l/?s=SYMBOL&...`) still works directly. Stooq has a low daily request quota,
+   so this is a fallback for a handful of commodity/currency series, not a high-volume source.
+
+| Instrument | Stooq symbol (to verify exact form in Section 3) |
 |---|---|
-| USD/INR | `USDINR=X` |
+| Gold | `xauusd` |
+| Crude oil (WTI) | `cl.f` |
+| USD/INR | `usdinr` |
+
+These are noted as "to verify" deliberately — Stooq's symbol conventions are inconsistently
+documented and the previous section's mistake (shipping an untested assumption) is exactly what
+we're correcting now. Section 3 verifies live before this is trusted.
 
 ---
 
-## 5. Macro / rates / inflation data — RBI DBIE (manual/periodic, no clean API)
+## 3. Macro / rates / inflation — unchanged from v0.1
 
-**Source:** RBI's public Database on Indian Economy — `dbie.rbihub.in` — publishes policy repo rate,
-CPI inflation, WPI, CRR, SLR, USD/INR reference rate, FX reserves, etc. It's free and official, but it
-does **not** expose a clean JSON/CSV API for automated pulls — it's a browsable data portal.
-
-**Design decision:** rather than build a fragile scraper against a government site's HTML (which is
-exactly the kind of thing that silently breaks and quietly corrupts a model), macro series are:
-1. Downloaded manually as CSV from DBIE on a periodic basis (monthly is plenty — these series update
-   monthly/bi-monthly anyway, e.g. RBI's Monetary Policy Committee meets ~6x/year),
-2. Committed to `data/macro/` in the repo as versioned snapshots,
-3. Loaded by the pipeline like any other CSV, with a "last updated" date stamped in the filename.
-
-This trades live-ness (which these series don't have anyway — CPI is a monthly print, repo rate changes
-~6x/year) for reliability, which is the right trade for a beginner-run system.
-
-**Series we will track this way (populated into `data/macro/` starting Section 5):**
-- Policy repo rate
-- CPI inflation (y/y)
-- WPI inflation (y/y)
-- Cash Reserve Ratio (CRR) / Statutory Liquidity Ratio (SLR)
-- USD/INR RBI reference rate (cross-check vs `USDINR=X`)
-
-**Secondary/backup source:** `data.gov.in` (India's open data portal) publishes some overlapping series
-with actual CSV/API download links — worth checking per-series in Section 5 if DBIE's manual export is
-awkward for a given field.
+RBI DBIE manual CSV snapshots, as documented previously. No change — this was never dependent on
+yfinance or NSE Bhavcopy in the first place.
 
 ---
 
-## 6. Calendar effects — computed, not fetched
+## 4. Calendar effects & lunar phase — unchanged from v0.1
 
-Day-of-week, month, F&O monthly-expiry date (last Thursday of the month, standard NSE convention —
-must be verified against the actual NSE holiday calendar since holidays shift it), and Indian festival
-dates (Diwali/Muhurat trading, etc.) are **computed from calendar logic + a static festival-date table**
-we maintain in `config/`, not pulled from any live source. No data source risk here — just needs to be
-kept up to date once a year.
+Computed, zero external dependency. No change.
 
 ---
 
-## 7. Lunar phase — computed, not fetched
+## 5. Revised summary table
 
-Per the project brief, lunar phase is derived from a pure astronomical formula (no API, no dependency
-risk). Full implementation is Section 4's job; noted here only so the "data source map" is complete —
-this is the one input with zero external dependency at all.
-
----
-
-## 8. Summary table — what depends on what
-
-| Data type | Source | Key required? | Live/refreshable? | Fragility |
+| Data type | Primary source | Fallback | Key required? | Fragility |
 |---|---|---|---|---|
-| Indices (Nifty/Sensex/BankNifty) | yfinance | No | Yes | Medium (rate limits) |
-| Individual stocks | yfinance | No | Yes | Medium (rate limits) |
-| Commodities (futures proxies) | yfinance | No | Yes | Medium |
-| USD/INR | yfinance | No | Yes | Medium |
-| Macro (repo rate, CPI, WPI, CRR/SLR) | RBI DBIE (manual CSV) | No | Monthly, manual | Low (but manual) |
-| Calendar/festival effects | Static table + logic | No | Yes (self-computed) | Low |
-| Lunar phase | Pure formula | No | Yes (self-computed) | None |
+| NSE indices | NSE index report (endpoint TBD, Section 3) | yfinance retry | No | Medium — needs endpoint verification |
+| NSE/BSE stocks | NSE Bhavcopy (UDiFF) | yfinance retry | No | Low–Medium (User-Agent/cookie handling needed) |
+| Commodities | yfinance retry | Stooq direct CSV | No | Medium |
+| USD/INR | yfinance retry | Stooq direct CSV | No | Medium |
+| Macro (repo/CPI/WPI/CRR/SLR) | RBI DBIE (manual) | data.gov.in | No | Low (manual) |
+| Calendar/festival effects | Static table + logic | — | No | Low |
+| Lunar phase | Pure formula | — | No | None |
 
 ---
 
-## 9. Open items for Section 3 (Data Ingestion Pipeline) to actually implement
+## 6. Open items for Section 3 (now updated)
 
-- Batching + retry/backoff wrapper around every `yfinance` call.
-- Local raw-data cache so a rate-limit mid-run doesn't lose earlier progress.
-- Stooq fallback path for the index-level series specifically.
-- A `data_freshness.json` or similar manifest so the pipeline (and the personas, later) know how stale
-  each series is, especially the manually-updated macro CSVs.
+- Implement NSE Bhavcopy downloader with proper headers/cookie warm-up, batching by date (one file/day
+  covers the whole stock universe — no per-ticker looping needed).
+- Pin down and live-test the exact current NSE index-report endpoint.
+- Implement Stooq direct-CSV fallback for commodities/currency, verify exact symbol strings live.
+- Keep yfinance as an opportunistic secondary path everywhere (cheap to try, just not trustworthy
+  as primary right now) — wrap every call in the retry/backoff already declared in settings.yaml.
+- Local raw-data cache so a rate-limit or 403 mid-run doesn't lose earlier progress.
+- `data_freshness.json` manifest, as previously planned.
