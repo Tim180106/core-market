@@ -1,21 +1,95 @@
-project:
-  name: "C.O.R.E"
-  version: "0.1.0"
+# C.O.R.E — central config
+# Version: v0.2 (Section 2 — populated data universe; Section 1 had placeholders only)
+# Every pipeline script should read from this file rather than hardcoding tickers/paths.
 
-data:
-  start_date: "2015-01-01"
-  end_date: null          # null = today, computed at runtime
-  universe:
-    indices: ["^NSEI", "^BSESN"]        # Nifty 50, Sensex
-    stocks_placeholder: []              # populated in Section 2 (Data Source Mapping)
+project:
+  name: "core-market"
+  description: "C.O.R.E — Central Organizer for Relaying Explanations"
   timezone: "Asia/Kolkata"
 
 paths:
-  raw: "data/raw"
-  processed: "data/processed"
-  cache: "data/cache"
-  models: "models_saved"
+  data_raw: "data/raw"
+  data_macro: "data/macro"
+  data_processed: "data/processed"
+  models_saved: "models_saved"
+  notebooks: "notebooks"
+  docs: "docs"
+  handoffs: "docs/handoffs"
 
-colab:
-  drive_mount_path: "/content/drive"
-  drive_project_folder: "MyDrive/core-market"
+date_range:
+  start: "2015-01-01"   # backtest history window; revisit once we know Colab RAM limits in Section 3
+  end: null              # null = pull up to latest available
+
+# ---------------------------------------------------------------------------
+# UNIVERSE — what we actually pull. See docs/data_sources.md for full rationale.
+# ---------------------------------------------------------------------------
+universe:
+
+  indices:
+    nifty50:    { symbol: "^NSEI",     source: "yfinance" }
+    sensex:     { symbol: "^BSESN",    source: "yfinance" }
+    nifty_bank: { symbol: "^NSEBANK",  source: "yfinance" }
+    # nifty_next50 symbol has been historically unreliable on yfinance — verify before trusting
+    nifty_next50: { symbol: "^NSEMDCP50", source: "yfinance", status: "unverified" }
+
+  stocks:
+    # Initial universe: liquid Nifty 50 large-caps, .NS (NSE) as primary listing.
+    # Expand/trim this list freely — everything downstream reads from here.
+    - { ticker: "RELIANCE.NS",   sector: "energy" }
+    - { ticker: "TCS.NS",        sector: "it" }
+    - { ticker: "HDFCBANK.NS",   sector: "financials" }
+    - { ticker: "ICICIBANK.NS",  sector: "financials" }
+    - { ticker: "INFY.NS",       sector: "it" }
+    - { ticker: "HINDUNILVR.NS", sector: "fmcg" }
+    - { ticker: "ITC.NS",        sector: "fmcg" }
+    - { ticker: "SBIN.NS",       sector: "financials" }
+    - { ticker: "BHARTIARTL.NS", sector: "telecom" }
+    - { ticker: "KOTAKBANK.NS",  sector: "financials" }
+    - { ticker: "LT.NS",         sector: "industrials" }
+    - { ticker: "AXISBANK.NS",   sector: "financials" }
+    - { ticker: "BAJFINANCE.NS", sector: "financials" }
+    - { ticker: "MARUTI.NS",     sector: "auto" }
+    - { ticker: "SUNPHARMA.NS",  sector: "pharma" }
+
+  commodities:
+    gold:        { symbol: "GC=F", source: "yfinance" }
+    silver:      { symbol: "SI=F", source: "yfinance" }
+    crude_wti:   { symbol: "CL=F", source: "yfinance" }
+    crude_brent: { symbol: "BZ=F", source: "yfinance", note: "preferred over WTI — India's imports are Brent-priced" }
+    copper:      { symbol: "HG=F", source: "yfinance" }
+    nat_gas:     { symbol: "NG=F", source: "yfinance" }
+
+  currency:
+    usd_inr: { symbol: "USDINR=X", source: "yfinance" }
+
+  macro:
+    # No clean free API — manual periodic CSV snapshots from RBI DBIE (dbie.rbihub.in).
+    # Files land in data/macro/ named like repo_rate_2026-08.csv; pipeline reads latest.
+    source: "RBI DBIE (manual export)"
+    secondary_source: "data.gov.in (per-series check)"
+    series:
+      - repo_rate
+      - cpi_inflation_yoy
+      - wpi_inflation_yoy
+      - crr
+      - slr
+      - usd_inr_reference_rate
+
+  calendar_effects:
+    source: "computed"
+    fno_expiry_rule: "last Thursday of month (NSE convention) — must reconcile against NSE holiday calendar"
+    festival_table_path: "config/festival_dates.yaml"   # to be created in Section 5 or 6
+
+  lunar_phase:
+    source: "computed"
+    method: "pure astronomical formula, no API/library dependency"
+
+# ---------------------------------------------------------------------------
+# Fetch behavior — enforced starting Section 3, declared here so it's config-driven
+# ---------------------------------------------------------------------------
+fetch:
+  batch_size: 5
+  delay_between_batches_sec: 2
+  max_retries: 4
+  backoff_base_sec: 5
+  fallback_source_for_indices: "stooq"
